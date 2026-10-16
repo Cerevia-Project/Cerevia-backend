@@ -1,0 +1,137 @@
+{
+  "id": "msg_launch_delay_answer",
+  "role": "assistant",
+  "text": "The launch is at risk because of an unresolved dependency on the payment-gateway API. The integration team flagged the endpoint contract as still under review, and no sign-off date has been recorded.",
+  "createdAt": "2026-10-16T00:00:00Z",
+  "answerStatus": "answered",
+  "claims": [
+    {
+      "id": "clm_1",
+      "text": "The payment-gateway API dependency is blocking launch readiness.",
+      "kind": "confirmed",
+      "citationIds": ["cit_1", "cit_2"],
+      "pathIds": ["pth_1"]
+    },
+    {
+      "id": "clm_2",
+      "text": "The gateway contract is expected to be finalised next week.",
+      "kind": "hypothesis",
+      "citationIds": ["cit_2"],
+      "pathIds": []
+    }
+  ],
+  "citations": [
+    {
+      "id": "cit_1",
+      "documentId": "doc_release_checklist",
+      "documentTitle": "Launch Release Checklist",
+      "documentVersion": "v2",
+      "chunkId": "chk_14",
+      "page": 3,
+      "section": "External dependencies",
+      "passage": "Payment-gateway API contract is not yet signed off; this blocks the go-live date.",
+      "sourceType": "document",
+      "sourceStatus": "approved"
+    },
+    {
+      "id": "cit_2",
+      "documentId": "doc_gateway_notes",
+      "documentTitle": "Gateway Integration Meeting Notes",
+      "documentVersion": "v1",
+      "chunkId": "chk_3",
+      "page": 1,
+      "section": "Decision",
+      "passage": "The vendor sign-off call is scheduled for next week.",
+      "sourceType": "meeting",
+      "sourceStatus": "approved"
+    }
+  ],
+  "paths": [
+    {
+      "id": "pth_1",
+      "nodeIds": ["prj_launch", "tsk_gateway", "doc_release_checklist"],
+      "edgeIds": ["edg_1", "edg_2"],
+      "description": "Launch project depends on the gateway task, evidenced by the release checklist."
+    }
+  ],
+  "subgraph": {
+    "nodes": [
+      { "id": "prj_launch", "type": "project", "label": "Payments Launch", "properties": {}, "isSampleData": true },
+      { "id": "tsk_gateway", "type": "task", "label": "Integrate payment gateway", "properties": {}, "isSampleData": true },
+      { "id": "doc_release_checklist", "type": "document", "label": "Launch Release Checklist", "properties": {}, "isSampleData": true }
+    ],
+    "edges": [
+      {
+        "id": "edg_1",
+        "type": "DEPENDS_ON",
+        "from": "prj_launch",
+        "to": "tsk_gateway",
+        "current": true,
+        "provenance": [],
+        "confidence": 1
+      },
+      {
+        "id": "edg_2",
+        "type": "DESCRIBES",
+        "from": "doc_release_checklist",
+        "to": "tsk_gateway",
+        "current": true,
+        "provenance": [],
+        "confidence": 1
+      }
+    ],
+    "truncated": false
+  },
+  "conflicts": [
+    {
+      "id": "cfl_1",
+      "kind": "contradiction",
+      "entities": [{ "id": "tsk_gateway", "type": "task", "label": "Integrate payment gateway", "isSampleData": true }],
+      "sides": [
+        {
+          "citation": {
+            "id": "cit_1",
+            "documentId": "doc_release_checklist",
+            "documentTitle": "Launch Release Checklist",
+            "documentVersion": "v2",
+            "chunkId": "chk_14",
+            "page": 3,
+            "section": "External dependencies",
+            "passage": "Not yet signed off.",
+            "sourceType": "document",
+            "sourceStatus": "approved"
+          },
+          "date": "2026-10-01T00:00:00Z",
+          "approvalStatus": "approved",
+          "authority": "project-manager"
+        },
+        {
+          "citation": {
+            "id": "cit_2",
+            "documentId": "doc_gateway_notes",
+            "documentTitle": "Gateway Integration Meeting Notes",
+            "documentVersion": "v1",
+            "chunkId": "chk_3",
+            "page": 1,
+            "section": "Decision",
+            "passage": "Contract was agreed in principle.",
+            "sourceType": "meeting",
+            "sourceStatus": "draft"
+          },
+          "date": "2026-10-08T00:00:00Z",
+          "approvalStatus": "draft",
+          "authority": "engineer"
+        }
+      ],
+      "relationship": "launch readiness of the gateway task",
+      "status": "needs_review",
+      "note": null
+    }
+  ],
+  "followUps": ["Who owns the gateway sign-off?", "What happens if the vendor misses the call?"],
+  "relatedEntities": [
+    { "id": "prj_launch", "type": "project", "label": "Payments Launch", "isSampleData": true },
+    { "id": "tsk_gateway", "type": "task", "label": "Integrate payment gateway", "isSampleData": true }
+  ],
+  "accessLimited": false
+}

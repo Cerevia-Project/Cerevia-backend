@@ -1,0 +1,17 @@
+{
+  "name": "contracts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "generate": "openapi-typescript openapi.yaml -o src/types.d.ts",
+    "mock": "prism mock openapi.yaml --port 4010",
+    "lint": "spectral lint openapi.yaml"
+  },
+  "devDependencies": {
+    "@stoplight/prism-cli": "^5.16.0",
+    "@stoplight/spectral-cli": "^6.17.0",
+    "@stoplight/spectral-rulesets": "^1.23.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3"
+  }
+}

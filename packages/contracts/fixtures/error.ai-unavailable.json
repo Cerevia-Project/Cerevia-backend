@@ -1,0 +1,9 @@
+{
+  "type": "https://cerevia.dev/errors/ai-unavailable",
+  "title": "AI Unavailable",
+  "status": 503,
+  "code": "AI_UNAVAILABLE",
+  "detail": "The AI provider is currently unavailable. Please retry later.",
+  "requestId": "req_0000000000000000000001",
+  "fieldErrors": []
+}

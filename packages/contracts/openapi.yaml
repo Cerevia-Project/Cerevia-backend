@@ -1,0 +1,2205 @@
+openapi: 3.1.0
+info:
+  title: Cerevia API
+  version: 1.0.0
+  description: |
+    Intelligence layer for Cerevia: knowledge graph, hybrid retrieval, and a
+    controlled assistant agent. Versioned under `/api/v1`. This contract is the
+    source of truth — the backend and frontend both generate types from it, and
+    a mock server serves it so the frontend can build with zero backend dependency.
+  contact:
+    name: Cerevia
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:3001
+    description: Local development
+
+tags:
+  - name: Auth
+  - name: Overview
+  - name: Conversations
+  - name: Knowledge Graph
+  - name: Projects
+  - name: Decisions
+  - name: People
+  - name: Conflicts
+  - name: Sources
+  - name: Actions
+  - name: Admin
+  - name: Platform
+
+security:
+  - sessionCookie: []
+  - csrfHeader: []
+
+paths:
+  # ── Auth & session ────────────────────────────────────────────────
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Create a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Logged in (sets the session cookie)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: End the current session
+      responses:
+        '204': { description: Session ended }
+
+  /api/v1/auth/session:
+    get:
+      tags: [Auth]
+      summary: Current user, org, roles, permissions and CSRF token
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/v1/auth/csrf:
+    get:
+      tags: [Auth]
+      summary: Refresh the CSRF token
+      responses:
+        '200':
+          description: New CSRF token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [csrfToken]
+                properties:
+                  csrfToken: { type: string }
+
+  # ── Overview ──────────────────────────────────────────────────────
+  /api/v1/overview:
+    get:
+      tags: [Overview]
+      summary: Aggregate dashboard counts and recent activity
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [sources, documents, people, teams, projects, recentDecisions,
+                   openBlockers, recentlyUpdated, ingestion, alerts, sampleDataNotice]
+                properties:
+                  sources: { type: integer }
+                  documents: { type: integer }
+                  people: { type: integer }
+                  teams: { type: integer }
+                  projects: { type: integer }
+                  recentDecisions:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  openBlockers:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  recentlyUpdated:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  ingestion:
+                    type: object
+                    required: [succeeded, failed, inProgress]
+                    properties:
+                      succeeded: { type: integer }
+                      failed: { type: integer }
+                      inProgress: { type: integer }
+                  alerts:
+                    type: array
+                    items: { type: string }
+                  sampleDataNotice: { type: boolean }
+
+  # ── Conversations & assistant ─────────────────────────────────────
+  /api/v1/conversations:
+    post:
+      tags: [Conversations]
+      summary: Create a conversation thread
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                scope:
+                  type: object
+                  properties:
+                    projectId: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+    get:
+      tags: [Conversations]
+      summary: List conversation threads
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated threads
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conversation' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/conversations/{id}:
+    get:
+      tags: [Conversations]
+      summary: Get a thread with its messages
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: Thread with messages
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Conversation'
+                  - type: object
+                    required: [messages]
+                    properties:
+                      messages:
+                        type: array
+                        items: { $ref: '#/components/schemas/Message' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Conversations]
+      summary: Delete a thread
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '204': { description: Deleted }
+
+  /api/v1/conversations/{id}/messages:
+    post:
+      tags: [Conversations]
+      summary: Send a question; returns 202 with a stream URL
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        '202':
+          description: Accepted for processing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messageId, streamUrl]
+                properties:
+                  messageId: { type: string }
+                  streamUrl: { type: string }
+
+  /api/v1/conversations/{id}/messages/{messageId}/stream:
+    get:
+      tags: [Conversations]
+      summary: SSE stream of answer events
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/StreamEvent' }
+
+  /api/v1/conversations/{id}/messages/{messageId}:
+    get:
+      tags: [Conversations]
+      summary: Final stored answer (non-streaming fallback)
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200':
+          description: Assistant message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssistantMessage' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/messages/{messageId}/evidence:
+    get:
+      tags: [Conversations]
+      summary: Full evidence bundle for a message
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200':
+          description: Evidence bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claims, citations, paths, retrievalSummary]
+                properties:
+                  claims:
+                    type: array
+                    items: { $ref: '#/components/schemas/Claim' }
+                  citations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Citation' }
+                  paths:
+                    type: array
+                    items: { $ref: '#/components/schemas/GraphPath' }
+                  retrievalSummary:
+                    type: object
+                    additionalProperties: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/messages/{messageId}/feedback:
+    post:
+      tags: [Conversations]
+      summary: Thumbs up/down with optional reason
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: string, enum: [up, down] }
+                reason: { type: string }
+      responses:
+        '204': { description: Feedback recorded }
+
+  # ── Knowledge graph ───────────────────────────────────────────────
+  /api/v1/graph/search:
+    get:
+      tags: [Knowledge Graph]
+      summary: Search entities
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: types
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching entities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/graph/entities/{id}:
+    get:
+      tags: [Knowledge Graph]
+      summary: Entity record with properties and provenance
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: Entity
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GraphNode'
+                  - type: object
+                    required: [provenance]
+                    properties:
+                      provenance:
+                        type: array
+                        items: { $ref: '#/components/schemas/Provenance' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/graph/entities/{id}/neighbors:
+    get:
+      tags: [Knowledge Graph]
+      summary: Focused graph expansion around an entity
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - name: edgeTypes
+          in: query
+          schema: { type: string }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [in, out, both] }
+        - name: depth
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 3 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Neighborhood subgraph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subgraph' }
+
+  /api/v1/graph/paths:
+    get:
+      tags: [Knowledge Graph]
+      summary: Bounded path finding between two entities
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+        - name: maxHops
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 6 }
+      responses:
+        '200':
+          description: Paths
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [paths, truncated]
+                properties:
+                  paths:
+                    type: array
+                    items: { $ref: '#/components/schemas/GraphPath' }
+                  truncated: { type: boolean }
+
+  /api/v1/graph/edges/{id}:
+    get:
+      tags: [Knowledge Graph]
+      summary: Edge with full provenance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Edge
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphEdge' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/graph/schema:
+    get:
+      tags: [Knowledge Graph]
+      summary: Entity/edge types and display metadata (schema-driven UI)
+      responses:
+        '200':
+          description: Graph schema
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entityTypes, edgeTypes]
+                properties:
+                  entityTypes:
+                    type: array
+                    items:
+                      type: object
+                      required: [type, label, colorKey]
+                      properties:
+                        type: { type: string }
+                        label: { type: string }
+                        colorKey: { type: string }
+                  edgeTypes:
+                    type: array
+                    items:
+                      type: object
+                      required: [type, label]
+                      properties:
+                        type: { type: string }
+                        label: { type: string }
+
+  /api/v1/graph/entities/{id}/history:
+    get:
+      tags: [Knowledge Graph]
+      summary: Historical versions of an entity and its edges
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: Version history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [versions]
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      required: [validFrom, validTo, current]
+                      properties:
+                        validFrom: { type: [string, 'null'], format: date-time }
+                        validTo: { type: [string, 'null'], format: date-time }
+                        current: { type: boolean }
+
+  # ── Projects & risks ──────────────────────────────────────────────
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: List projects with status and risk level
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProjectSummary' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Project summary, milestones, owners and docs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/projects/{id}/tasks:
+    get:
+      tags: [Projects]
+      summary: Tasks with status and owner
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/projects/{id}/dependencies:
+    get:
+      tags: [Projects]
+      summary: Dependency subgraph (cross-team flagged)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Dependency subgraph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subgraph' }
+
+  /api/v1/projects/{id}/risks:
+    get:
+      tags: [Projects]
+      summary: Risks with kind and evidence
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Risks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Risk' }
+
+  /api/v1/projects/{id}/launch-readiness:
+    get:
+      tags: [Projects]
+      summary: Evidence-backed readiness summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Launch readiness
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verdict, summary, claims, citations]
+                properties:
+                  verdict: { type: string, enum: [ready, at_risk, not_ready] }
+                  summary: { type: string }
+                  claims:
+                    type: array
+                    items: { $ref: '#/components/schemas/Claim' }
+                  citations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Citation' }
+
+  /api/v1/risks:
+    get:
+      tags: [Projects]
+      summary: Cross-project at-risk view
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, default: week }
+      responses:
+        '200':
+          description: Risks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Risk' }
+
+  # ── Decisions ─────────────────────────────────────────────────────
+  /api/v1/decisions:
+    get:
+      tags: [Decisions]
+      summary: List decisions
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: projectId
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated decisions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/DecisionSummary' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/decisions/{id}:
+    get:
+      tags: [Decisions]
+      summary: Decision summary with rationale and citations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Decision detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisionDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/decisions/{id}/revisions:
+    get:
+      tags: [Decisions]
+      summary: Revision history and superseding chain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Revisions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+
+  /api/v1/decisions/{id}/trace:
+    get:
+      tags: [Decisions]
+      summary: Evidence trail with validity assessment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Decision trace
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [paths, citations, validity]
+                properties:
+                  paths:
+                    type: array
+                    items: { $ref: '#/components/schemas/GraphPath' }
+                  citations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Citation' }
+                  validity:
+                    type: string
+                    enum: [still_valid, superseded, unclear]
+
+  # ── People & teams ────────────────────────────────────────────────
+  /api/v1/people:
+    get:
+      tags: [People]
+      summary: List people
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated people
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/people/{id}:
+    get:
+      tags: [People]
+      summary: Authorized profile with expertise and evidence
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Person profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonProfile' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/teams:
+    get:
+      tags: [People]
+      summary: List teams
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated teams
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/teams/{id}:
+    get:
+      tags: [People]
+      summary: Team members and owned projects/systems
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Team detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, label, members, owned]
+                properties:
+                  id: { type: string }
+                  label: { type: string }
+                  members:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+                  owned:
+                    type: array
+                    items: { $ref: '#/components/schemas/EntityRef' }
+
+  /api/v1/expertise/search:
+    get:
+      tags: [People]
+      summary: Ranked people by expertise topic with evidence
+      parameters:
+        - name: topic
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Expertise matches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [person, score, evidence]
+                      properties:
+                        person: { $ref: '#/components/schemas/EntityRef' }
+                        score: { type: number }
+                        evidence:
+                          type: array
+                          items: { $ref: '#/components/schemas/Citation' }
+
+  # ── Conflicts ─────────────────────────────────────────────────────
+  /api/v1/conflicts:
+    get:
+      tags: [Conflicts]
+      summary: List conflicts
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: entityId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated conflicts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conflict' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/conflicts/{id}:
+    get:
+      tags: [Conflicts]
+      summary: Conflict detail with sides
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conflict' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Conflicts]
+      summary: Set status or add a reviewer note (role-gated)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [open, needs_review, resolved] }
+                note: { type: string }
+      responses:
+        '200':
+          description: Updated conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conflict' }
+
+  # ── Sources & ingestion ───────────────────────────────────────────
+  /api/v1/sources:
+    get:
+      tags: [Sources]
+      summary: List sources with connection state
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated sources
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Source' }
+                  nextCursor: { type: [string, 'null'] }
+    post:
+      tags: [Sources]
+      summary: Create a source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string }
+                type: { type: string, enum: [upload, connector] }
+      responses:
+        '201':
+          description: Created source
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+
+  /api/v1/sources/{id}:
+    patch:
+      tags: [Sources]
+      summary: Update a source
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: Updated source
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+    delete:
+      tags: [Sources]
+      summary: Delete a source (triggers retention procedure)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted }
+
+  /api/v1/sources/{id}/uploads:
+    post:
+      tags: [Sources]
+      summary: Upload a document for ingestion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '202':
+          description: Upload accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId]
+                properties:
+                  jobId: { type: string }
+        '415':
+          $ref: '#/components/responses/UnsupportedFileType'
+
+  /api/v1/documents:
+    get:
+      tags: [Sources]
+      summary: List documents
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Document' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/documents/{id}:
+    get:
+      tags: [Sources]
+      summary: Document metadata, versions and status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/documents/{id}/content:
+    get:
+      tags: [Sources]
+      summary: Authorized text/chunk view for evidence inspection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: chunk
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Document content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [documentId, content]
+                properties:
+                  documentId: { type: string }
+                  chunkId: { type: [string, 'null'] }
+                  content: { type: string }
+
+  /api/v1/ingestion/jobs:
+    get:
+      tags: [Sources]
+      summary: List ingestion jobs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/IngestionJob' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/ingestion/jobs/{id}:
+    get:
+      tags: [Sources]
+      summary: Ingestion job status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestionJob' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ingestion/jobs/{id}/retry:
+    post:
+      tags: [Sources]
+      summary: Retry a failed job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '202':
+          description: Retry accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId]
+                properties:
+                  jobId: { type: string }
+
+  /api/v1/ingestion/jobs/{id}/events:
+    get:
+      tags: [Sources]
+      summary: SSE progress stream (polling is the supported baseline)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Progress stream
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/IngestionEvent' }
+
+  /api/v1/connectors:
+    get:
+      tags: [Sources]
+      summary: Connector catalog with implementation state
+      responses:
+        '200':
+          description: Connectors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, state]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        state: { type: string, enum: [implemented, planned] }
+
+  /api/v1/demo/load:
+    post:
+      tags: [Sources]
+      summary: Load the synthetic dataset through the real pipeline (admin only)
+      responses:
+        '202':
+          description: Demo load accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: array
+                    items: { type: string }
+
+  # ── Actions & approvals ───────────────────────────────────────────
+  /api/v1/actions/proposals:
+    post:
+      tags: [Actions]
+      summary: Generate an action proposal
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind:
+                  type: string
+                  enum: [status_report, meeting_summary, follow_up_tasks, handover_doc, support_reply, action_plan, launch_readiness_report]
+                context:
+                  type: object
+                  properties:
+                    projectId: { type: string }
+                    messageId: { type: string }
+      responses:
+        '202':
+          description: Proposal accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposalId]
+                properties:
+                  proposalId: { type: string }
+    get:
+      tags: [Actions]
+      summary: List proposals
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ActionProposal' }
+                  nextCursor: { type: [string, 'null'] }
+
+  /api/v1/actions/proposals/{id}:
+    get:
+      tags: [Actions]
+      summary: Proposal draft content, rationale and citations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionProposal' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Actions]
+      summary: Edit a draft proposal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string }
+      responses:
+        '200':
+          description: Updated proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionProposal' }
+
+  /api/v1/actions/proposals/{id}/approve:
+    post:
+      tags: [Actions]
+      summary: Approve a proposal (requires actions:approve)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmation: { type: string }
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionProposal' }
+
+  /api/v1/actions/proposals/{id}/reject:
+    post:
+      tags: [Actions]
+      summary: Reject a proposal with a reason
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionProposal' }
+
+  /api/v1/audit:
+    get:
+      tags: [Actions]
+      summary: Audit records (admin/auditor)
+      parameters:
+        - name: actor
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated audit records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditRecord' }
+                  nextCursor: { type: [string, 'null'] }
+
+  # ── Admin ─────────────────────────────────────────────────────────
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+    post:
+      tags: [Admin]
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+      responses:
+        '201':
+          description: Created user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /api/v1/admin/roles:
+    get:
+      tags: [Admin]
+      summary: List roles
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Role' }
+
+  /api/v1/admin/permissions:
+    get:
+      tags: [Admin]
+      summary: List permission strings
+      responses:
+        '200':
+          description: Permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: string }
+
+  /api/v1/admin/sources/{id}/access:
+    get:
+      tags: [Admin]
+      summary: Read a source's ACL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Source ACL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sourceId, grants]
+                properties:
+                  sourceId: { type: string }
+                  grants:
+                    type: array
+                    items:
+                      type: object
+                      required: [principalType, principalId, permission]
+                      properties:
+                        principalType: { type: string, enum: [user, role, team] }
+                        principalId: { type: string }
+                        permission: { type: string, enum: [read, write] }
+    put:
+      tags: [Admin]
+      summary: Replace a source's ACL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grants]
+              properties:
+                grants:
+                  type: array
+                  items:
+                    type: object
+                    required: [principalType, principalId, permission]
+                    properties:
+                      principalType: { type: string, enum: [user, role, team] }
+                      principalId: { type: string }
+                      permission: { type: string, enum: [read, write] }
+      responses:
+        '200':
+          description: Updated ACL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sourceId, grants]
+                properties:
+                  sourceId: { type: string }
+                  grants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        principalType: { type: string }
+                        principalId: { type: string }
+                        permission: { type: string }
+
+  /api/v1/admin/organization:
+    get:
+      tags: [Admin]
+      summary: Organization settings
+      responses:
+        '200':
+          description: Organization
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+
+  /api/v1/admin/audit:
+    get:
+      tags: [Admin]
+      summary: Admin audit view with filters
+      parameters:
+        - name: actor
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Paginated audit records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditRecord' }
+                  nextCursor: { type: [string, 'null'] }
+
+  # ── Platform ──────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Platform]
+      security: []
+      summary: Health check
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /version:
+    get:
+      tags: [Platform]
+      security: []
+      summary: Service version
+      responses:
+        '200':
+          description: Version info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version: { type: string }
+
+  /api/v1/messages/{id}/trace:
+    get:
+      tags: [Platform]
+      summary: Retrieval trace (development only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Retrieval trace
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messageId, tools, timings]
+                properties:
+                  messageId: { type: string }
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, resultsCount, filteredCount, durationMs]
+                      properties:
+                        name: { type: string }
+                        resultsCount: { type: integer }
+                        filteredCount: { type: integer }
+                        durationMs: { type: number }
+                  timings:
+                    type: object
+                    additionalProperties: { type: number }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sid
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    ConversationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: string }
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string }
+
+  responses:
+    Unauthenticated:
+      description: Not authenticated
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            type: https://cerevia.dev/errors/unauthenticated
+            title: Unauthenticated
+            status: 401
+            code: UNAUTHENTICATED
+            detail: A valid session is required.
+            requestId: req_0000000000000000000000
+    NotFound:
+      description: Not found (redacted when access is denied)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            type: https://cerevia.dev/errors/not-found
+            title: Not Found
+            status: 404
+            code: NOT_FOUND
+            detail: Resource not found.
+            requestId: req_0000000000000000000000
+    UnsupportedFileType:
+      description: Unsupported file type
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            type: https://cerevia.dev/errors/unsupported-file-type
+            title: Unsupported Media Type
+            status: 415
+            code: UNSUPPORTED_FILE_TYPE
+            detail: The uploaded file type is not supported.
+            requestId: req_0000000000000000000000
+
+  schemas:
+    EntityRef:
+      type: object
+      required: [id, type, label, isSampleData]
+      properties:
+        id: { type: string }
+        type: { $ref: '#/components/schemas/EntityType' }
+        label: { type: string }
+        isSampleData: { type: boolean }
+
+    EntityType:
+      type: string
+      enum:
+        [employee, team, department, project, milestone, task, issue,
+         document, meeting, decision, customer, ticket, policy, system, action_item]
+
+    ExtractionMethod:
+      type: string
+      enum: [manual, structured_import, llm_extracted]
+
+    Provenance:
+      type: object
+      required: [sourceId, documentId, documentVersion, chunkId, passage, recordedAt, confidence, extractionMethod]
+      properties:
+        sourceId: { type: string }
+        documentId: { type: string }
+        documentVersion: { type: string }
+        chunkId: { type: string }
+        page: { type: [integer, 'null'] }
+        section: { type: [string, 'null'] }
+        passage: { type: string }
+        recordedAt: { type: string, format: date-time }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        extractionMethod: { $ref: '#/components/schemas/ExtractionMethod' }
+
+    Citation:
+      type: object
+      required: [id, documentId, documentTitle, documentVersion, chunkId, passage, sourceType, sourceStatus]
+      properties:
+        id: { type: string }
+        documentId: { type: string }
+        documentTitle: { type: string }
+        documentVersion: { type: string }
+        chunkId: { type: string }
+        page: { type: [integer, 'null'] }
+        section: { type: [string, 'null'] }
+        passage: { type: string }
+        sourceType: { type: string }
+        sourceStatus:
+          type: string
+          enum: [approved, draft, superseded, unknown]
+
+    GraphNode:
+      type: object
+      required: [id, type, label, properties, isSampleData]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        label: { type: string }
+        properties: { type: object, additionalProperties: true }
+        isSampleData: { type: boolean }
+        hiddenNeighborCount: { type: integer }
+
+    GraphEdge:
+      type: object
+      required: [id, type, from, to, current, provenance, confidence]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        from: { type: string }
+        to: { type: string }
+        validFrom: { type: [string, 'null'], format: date-time }
+        validTo: { type: [string, 'null'], format: date-time }
+        current: { type: boolean }
+        provenance:
+          type: array
+          items: { $ref: '#/components/schemas/Provenance' }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+
+    Subgraph:
+      type: object
+      required: [nodes, edges, truncated]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdge' }
+        truncated: { type: boolean }
+
+    EvidenceKind:
+      type: string
+      enum: [confirmed, inferred, hypothesis, conflicting, missing]
+
+    Claim:
+      type: object
+      required: [id, text, kind, citationIds, pathIds]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        kind: { $ref: '#/components/schemas/EvidenceKind' }
+        citationIds:
+          type: array
+          items: { type: string }
+        pathIds:
+          type: array
+          items: { type: string }
+
+    GraphPath:
+      type: object
+      required: [id, nodeIds, edgeIds, description]
+      properties:
+        id: { type: string }
+        nodeIds:
+          type: array
+          items: { type: string }
+        edgeIds:
+          type: array
+          items: { type: string }
+        description: { type: string }
+
+    Conflict:
+      type: object
+      required: [id, kind, entities, sides, relationship, status]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [contradiction, outdated, superseded]
+        entities:
+          type: array
+          items: { $ref: '#/components/schemas/EntityRef' }
+        sides:
+          type: array
+          items:
+            type: object
+            required: [citation, date, approvalStatus, authority]
+            properties:
+              citation: { $ref: '#/components/schemas/Citation' }
+              date: { type: string, format: date-time }
+              approvalStatus: { type: string }
+              authority: { type: string }
+        relationship: { type: string }
+        status:
+          type: string
+          enum: [open, needs_review, resolved]
+        note: { type: [string, 'null'] }
+
+    Error:
+      type: object
+      required: [type, title, status, code, detail, requestId]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        requestId: { type: string }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    Session:
+      type: object
+      required: [user, organization, roles, permissions, csrfToken]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        organization:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        csrfToken: { type: string }
+
+    User:
+      type: object
+      required: [id, email, name, isSampleData]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        isSampleData: { type: boolean }
+
+    Role:
+      type: object
+      required: [id, name, permissions]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+
+    Conversation:
+      type: object
+      required: [id, title, createdAt, isSampleData]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        scope:
+          type: object
+          properties:
+            projectId: { type: string }
+        createdAt: { type: string, format: date-time }
+        isSampleData: { type: boolean }
+
+    Message:
+      type: object
+      required: [id, role, createdAt]
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AnswerStatus:
+      type: string
+      enum: [answered, partial, insufficient_evidence]
+
+    AssistantMessage:
+      allOf:
+        - $ref: '#/components/schemas/Message'
+        - type: object
+          required: [answerStatus, claims, citations, paths, subgraph, conflicts, followUps, relatedEntities, accessLimited]
+          properties:
+            answerStatus: { $ref: '#/components/schemas/AnswerStatus' }
+            claims:
+              type: array
+              items: { $ref: '#/components/schemas/Claim' }
+            citations:
+              type: array
+              items: { $ref: '#/components/schemas/Citation' }
+            paths:
+              type: array
+              items: { $ref: '#/components/schemas/GraphPath' }
+            subgraph: { $ref: '#/components/schemas/Subgraph' }
+            conflicts:
+              type: array
+              items: { $ref: '#/components/schemas/Conflict' }
+            followUps:
+              type: array
+              items: { type: string }
+            relatedEntities:
+              type: array
+              items: { $ref: '#/components/schemas/EntityRef' }
+            accessLimited: { type: boolean }
+
+    StreamEvent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [status, text_delta, claim, citation, path, conflict, follow_ups, actions, done, error]
+        stage:
+          type: string
+          enum: [understanding, retrieving, traversing, checking_access, writing]
+        text: { type: string }
+        claim: { $ref: '#/components/schemas/Claim' }
+        citation: { $ref: '#/components/schemas/Citation' }
+        path: { $ref: '#/components/schemas/GraphPath' }
+        subgraph: { $ref: '#/components/schemas/Subgraph' }
+        conflict: { $ref: '#/components/schemas/Conflict' }
+        suggestions:
+          type: array
+          items: { type: string }
+        relatedEntities:
+          type: array
+          items: { $ref: '#/components/schemas/EntityRef' }
+        actions:
+          type: array
+          items:
+            type: object
+            required: [kind, label, payload]
+            properties:
+              kind: { type: string }
+              label: { type: string }
+              payload: { type: object, additionalProperties: true }
+        messageId: { type: string }
+        answerStatus: { $ref: '#/components/schemas/AnswerStatus' }
+        accessLimited: { type: boolean }
+        code: { type: string }
+        detail: { type: string }
+
+    IngestionEvent:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [stage, progress, error, done] }
+        stage: { type: string }
+        progress: { type: number, minimum: 0, maximum: 1 }
+        detail: { type: string }
+
+    Source:
+      type: object
+      required: [id, name, type, state, lastSync, errorSummary, isSampleData]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [upload, connector] }
+        state: { type: string, enum: [connected, disconnected, error] }
+        lastSync: { type: [string, 'null'], format: date-time }
+        errorSummary: { type: [string, 'null'] }
+        isSampleData: { type: boolean }
+
+    Document:
+      type: object
+      required: [id, sourceId, title, status, versions, isSampleData]
+      properties:
+        id: { type: string }
+        sourceId: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [approved, draft, superseded, unknown] }
+        versions:
+          type: array
+          items:
+            type: object
+            required: [id, version, createdAt, contentHash]
+            properties:
+              id: { type: string }
+              version: { type: integer }
+              createdAt: { type: string, format: date-time }
+              contentHash: { type: string }
+        isSampleData: { type: boolean }
+
+    IngestionJob:
+      type: object
+      required: [id, sourceId, documentId, status, stage, createdAt, error, isSampleData]
+      properties:
+        id: { type: string }
+        sourceId: { type: string }
+        documentId: { type: [string, 'null'] }
+        status:
+          type: string
+          enum: [queued, running, done, failed]
+        stage: { type: string }
+        progress: { type: number, minimum: 0, maximum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        error: { type: [string, 'null'] }
+        isSampleData: { type: boolean }
+
+    ProjectSummary:
+      type: object
+      required: [id, label, status, riskLevel, isSampleData]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        status: { type: string }
+        riskLevel: { type: string, enum: [low, medium, high] }
+        isSampleData: { type: boolean }
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          required: [milestones, owners, documents]
+          properties:
+            milestones:
+              type: array
+              items: { $ref: '#/components/schemas/EntityRef' }
+            owners:
+              type: array
+              items: { $ref: '#/components/schemas/EntityRef' }
+            documents:
+              type: array
+              items: { $ref: '#/components/schemas/EntityRef' }
+
+    Risk:
+      type: object
+      required: [id, title, kind, severity, rationale, claims, citations]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind: { $ref: '#/components/schemas/EvidenceKind' }
+        severity: { type: string, enum: [low, medium, high] }
+        rationale: { type: string }
+        claims:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+        citations:
+          type: array
+          items: { $ref: '#/components/schemas/Citation' }
+
+    DecisionSummary:
+      type: object
+      required: [id, title, date, status, owner, isSampleData]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        date: { type: string, format: date-time }
+        status: { type: string }
+        owner: { $ref: '#/components/schemas/EntityRef' }
+        isSampleData: { type: boolean }
+
+    DecisionDetail:
+      allOf:
+        - $ref: '#/components/schemas/DecisionSummary'
+        - type: object
+          required: [approver, rationale, alternatives, affectedEntities, citations]
+          properties:
+            approver: { $ref: '#/components/schemas/EntityRef' }
+            rationale: { type: string }
+            alternatives:
+              type: array
+              items: { type: string }
+            affectedEntities:
+              type: array
+              items: { $ref: '#/components/schemas/EntityRef' }
+            citations:
+              type: array
+              items: { $ref: '#/components/schemas/Citation' }
+
+    PersonProfile:
+      type: object
+      required: [id, label, memberships, responsibilities, expertise]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        memberships:
+          type: array
+          items: { $ref: '#/components/schemas/EntityRef' }
+        responsibilities:
+          type: array
+          items: { type: string }
+        expertise:
+          type: array
+          items:
+            type: object
+            required: [topic, evidence]
+            properties:
+              topic: { type: string }
+              evidence:
+                type: array
+                items: { $ref: '#/components/schemas/Citation' }
+
+    ActionProposal:
+      type: object
+      required: [id, kind, status, content, rationale, citations, isSampleData]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        status:
+          type: string
+          enum: [draft, pending_approval, approved, executing, executed, failed, rejected]
+        content: { type: string }
+        rationale: { type: string }
+        citations:
+          type: array
+          items: { $ref: '#/components/schemas/Citation' }
+        isSampleData: { type: boolean }
+
+    AuditRecord:
+      type: object
+      required: [id, actor, action, resourceType, resourceId, timestamp, metadata]
+      properties:
+        id: { type: string }
+        actor: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: [string, 'null'] }
+        timestamp: { type: string, format: date-time }
+        metadata: { type: object, additionalProperties: true }

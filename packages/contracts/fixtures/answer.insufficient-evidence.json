@@ -1,0 +1,36 @@
+{
+  "id": "msg_insufficient_answer",
+  "role": "assistant",
+  "text": "I could not confirm a decision on that. The retrieved documents mention the topic but none record an approved resolution.",
+  "createdAt": "2026-10-16T00:00:00Z",
+  "answerStatus": "insufficient_evidence",
+  "claims": [
+    {
+      "id": "clm_1",
+      "text": "The topic is discussed in the engineering notes but no resolution is recorded.",
+      "kind": "missing",
+      "citationIds": ["cit_1"],
+      "pathIds": []
+    }
+  ],
+  "citations": [
+    {
+      "id": "cit_1",
+      "documentId": "doc_eng_notes",
+      "documentTitle": "Engineering Notes",
+      "documentVersion": "v1",
+      "chunkId": "chk_2",
+      "page": 1,
+      "section": "Open questions",
+      "passage": "Still open: whether to use queue A or queue B.",
+      "sourceType": "document",
+      "sourceStatus": "draft"
+    }
+  ],
+  "paths": [],
+  "subgraph": { "nodes": [], "edges": [], "truncated": false },
+  "conflicts": [],
+  "followUps": ["Ask the team owner for the open decision", "Search for a later decision record"],
+  "relatedEntities": [],
+  "accessLimited": false
+}

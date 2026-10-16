@@ -1,0 +1,9 @@
+{
+  "type": "https://cerevia.dev/errors/forbidden",
+  "title": "Forbidden",
+  "status": 403,
+  "code": "FORBIDDEN",
+  "detail": "You do not have permission to perform this action.",
+  "requestId": "req_0000000000000000000002",
+  "fieldErrors": []
+}
