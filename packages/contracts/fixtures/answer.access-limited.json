@@ -1,0 +1,36 @@
+{
+  "id": "msg_access_limited_answer",
+  "role": "assistant",
+  "text": "Part of the answer depends on a document you do not have access to, so that portion is omitted.",
+  "createdAt": "2026-10-16T00:00:00Z",
+  "answerStatus": "partial",
+  "claims": [
+    {
+      "id": "clm_1",
+      "text": "The launch date is recorded in the project plan.",
+      "kind": "confirmed",
+      "citationIds": ["cit_1"],
+      "pathIds": []
+    }
+  ],
+  "citations": [
+    {
+      "id": "cit_1",
+      "documentId": "doc_project_plan",
+      "documentTitle": "Project Plan",
+      "documentVersion": "v1",
+      "chunkId": "chk_1",
+      "page": 1,
+      "section": "Timeline",
+      "passage": "Launch is targeted for the end of the month.",
+      "sourceType": "document",
+      "sourceStatus": "approved"
+    }
+  ],
+  "paths": [],
+  "subgraph": { "nodes": [], "edges": [], "truncated": false },
+  "conflicts": [],
+  "followUps": [],
+  "relatedEntities": [],
+  "accessLimited": true
+}

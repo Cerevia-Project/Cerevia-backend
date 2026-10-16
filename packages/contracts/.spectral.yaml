@@ -1,0 +1,9 @@
+extends:
+  - spectral:oas
+
+# Summaries are the human-readable text in this contract; `description` is
+# optional and `operationId` is derived by tooling (openapi-typescript, Prism)
+# from method + path, so we silence those two noise rules.
+rules:
+  operation-description: off
+  operation-operationId: off

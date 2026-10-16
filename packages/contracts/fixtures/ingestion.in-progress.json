@@ -1,0 +1,12 @@
+{
+  "id": "job_in_progress",
+  "sourceId": "src_1",
+  "documentId": "doc_1",
+  "status": "running",
+  "stage": "chunking",
+  "progress": 0.55,
+  "createdAt": "2026-10-16T00:00:00Z",
+  "updatedAt": "2026-10-16T00:00:02Z",
+  "error": null,
+  "isSampleData": true
+}

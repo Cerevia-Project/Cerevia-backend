@@ -1,0 +1,48 @@
+{
+  "nodes": [
+    { "id": "prj_launch", "type": "project", "label": "Payments Launch", "properties": { "status": "at_risk" }, "isSampleData": true },
+    { "id": "mil_m1", "type": "milestone", "label": "Gateway integration complete", "properties": {}, "isSampleData": true },
+    { "id": "tsk_gateway", "type": "task", "label": "Integrate payment gateway", "properties": { "status": "blocked" }, "isSampleData": true },
+    { "id": "emp_ada", "type": "employee", "label": "Ada Lovelace", "properties": { "email": "ada@cerevia.dev" }, "isSampleData": true },
+    { "id": "team_payments", "type": "team", "label": "Payments", "properties": {}, "isSampleData": true }
+  ],
+  "edges": [
+    {
+      "id": "edg_1",
+      "type": "CONTAINS_TASK",
+      "from": "mil_m1",
+      "to": "tsk_gateway",
+      "current": true,
+      "provenance": [],
+      "confidence": 1
+    },
+    {
+      "id": "edg_2",
+      "type": "DEPENDS_ON",
+      "from": "prj_launch",
+      "to": "tsk_gateway",
+      "current": true,
+      "provenance": [],
+      "confidence": 1
+    },
+    {
+      "id": "edg_3",
+      "type": "ASSIGNED_TO",
+      "from": "tsk_gateway",
+      "to": "emp_ada",
+      "current": true,
+      "provenance": [],
+      "confidence": 1
+    },
+    {
+      "id": "edg_4",
+      "type": "BELONGS_TO_TEAM",
+      "from": "emp_ada",
+      "to": "team_payments",
+      "current": true,
+      "provenance": [],
+      "confidence": 1
+    }
+  ],
+  "truncated": false
+}

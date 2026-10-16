@@ -1,0 +1,16 @@
+{
+  "name": "cerevia-backend",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "pnpm --filter api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "contracts:generate": "pnpm --filter contracts generate",
+    "contracts:mock": "pnpm --filter contracts mock",
+    "contracts:lint": "pnpm --filter contracts lint"
+  }
+}

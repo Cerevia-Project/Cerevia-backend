@@ -1,0 +1,12 @@
+{
+  "id": "job_failed",
+  "sourceId": "src_1",
+  "documentId": null,
+  "status": "failed",
+  "stage": "extracting_text",
+  "progress": 0.4,
+  "createdAt": "2026-10-16T00:00:00Z",
+  "updatedAt": "2026-10-16T00:00:03Z",
+  "error": "Failed to parse PDF: unsupported encryption",
+  "isSampleData": true
+}

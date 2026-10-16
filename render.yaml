@@ -1,0 +1,70 @@
+services:
+  - type: web
+    name: cerevia-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cerevia-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: cerevia-redis
+          type: keyvalue
+          property: connectionString
+      - key: FALKORDB_HOST
+        value: cerevia-falkordb
+      - key: FALKORDB_PORT
+        value: "6379"
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_REGION
+        value: auto
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-5-5
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: VOYAGE_MODEL
+        value: voyage-3-large
+      - key: VOYAGE_EMBEDDING_DIMENSION
+        value: "1024"
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: admin@cerevia.dev
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ORG_NAME
+        value: Cerevia
+
+  - type: pserv
+    name: cerevia-falkordb
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./deploy/falkordb
+
+  - type: keyvalue
+    name: cerevia-redis
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: anywhere
+
+databases:
+  - name: cerevia-db
+    plan: free

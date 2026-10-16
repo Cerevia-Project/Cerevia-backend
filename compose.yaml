@@ -1,0 +1,46 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: cerevia-falkordb
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    environment:
+      REDIS_ARGS: "--requirepass ${FALKORDB_PASSWORD} --appendonly yes"
+    volumes:
+      - falkordb_data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cerevia-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cerevia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cerevia}
+      POSTGRES_DB: ${POSTGRES_DB:-cerevia}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Separate Redis for BullMQ so queue persistence settings do not conflict
+  # with FalkorDB's Redis-protocol server on 6379.
+  redis:
+    image: redis:7-alpine
+    container_name: cerevia-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Object storage is a filesystem backend in dev (`.data/uploads`); the S3
+  # backend is available via STORAGE_BACKEND=s3 for real deployments. MinIO and
+  # LocalStack both ended free distribution in 2025–2026.
+
+volumes:
+  falkordb_data:
+  postgres_data:
+  redis_data:
