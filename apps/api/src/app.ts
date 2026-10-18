@@ -18,11 +18,13 @@ import {
   risksRouter,
   teamsRouter,
 } from "./modules/company/routes.js";
+import connectorsRouter from "./modules/connectors/routes.js";
 import conversationsRouter, { messagesRouter } from "./modules/conversations/routes.js";
 import demoRouter from "./modules/demo/routes.js";
 import documentsRouter from "./modules/documents/routes.js";
 import graphRouter from "./modules/graph/routes.js";
 import ingestionRouter from "./modules/ingestion/routes.js";
+import overviewRouter from "./modules/overview/routes.js";
 import sourcesRouter from "./modules/sources/routes.js";
 import healthRouter from "./routes/health.js";
 
@@ -37,6 +39,8 @@ export function createApp() {
   app.use(rateLimit());
 
   app.use("/api/v1/auth", authRouter);
+  app.use("/api/v1/overview", overviewRouter);
+  app.use("/api/v1/connectors", connectorsRouter);
   app.use("/api/v1/sources", sourcesRouter);
   app.use("/api/v1/documents", documentsRouter);
   app.use("/api/v1/ingestion/jobs", ingestionRouter);
