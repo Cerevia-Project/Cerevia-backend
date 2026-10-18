@@ -3,12 +3,16 @@ services:
     image: falkordb/falkordb:latest
     container_name: cerevia-falkordb
     ports:
-      - "6379:6379"
-      - "3000:3000"
+      # Configurable: a local Redis on 6379 answers but has no graph module.
+      - "${FALKORDB_PORT:-6379}:6379"
+      # Browser UI, kept off 3000 (the frontend dev server).
+      - "${FALKORDB_UI_PORT:-3100}:3000"
     environment:
-      REDIS_ARGS: "--requirepass ${FALKORDB_PASSWORD} --appendonly yes"
+      # --requirepass only when a password is set; an empty one stops Redis starting.
+      REDIS_ARGS: "--appendonly yes${FALKORDB_PASSWORD:+ --requirepass }${FALKORDB_PASSWORD}"
     volumes:
-      - falkordb_data:/data
+      # FalkorDB's real data directory; /data only holds a symlink to it.
+      - falkordb_data:/var/lib/falkordb/data
     restart: unless-stopped
 
   postgres:

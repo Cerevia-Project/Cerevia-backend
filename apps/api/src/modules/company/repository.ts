@@ -104,25 +104,41 @@ export async function listProjectTasks(orgId: string, projectId: string) {
   return (result.data ?? []).map((row) => ref(row.t));
 }
 
+/** The project's dependency chain, up to three hops, including the project itself. */
 export async function getProjectDependencies(orgId: string, projectId: string) {
   const graph = await getTenantGraph(orgId);
-  const result = await graph.query<{ m: Node; r: Edge }>(
-    "MATCH (p:Project {orgId: $orgId, id: $projectId})-[r]-(m {orgId: $orgId}) WHERE type(r) IN ['DEPENDS_ON', 'BLOCKS'] RETURN m, r LIMIT 50",
+  const result = await graph.query<{ ns: Node[]; rs: Edge[] }>(
+    `MATCH path = (p:Project {orgId: $orgId, id: $projectId})-[:DEPENDS_ON|BLOCKS*1..3]-(m {orgId: $orgId})
+     RETURN nodes(path) AS ns, relationships(path) AS rs
+     LIMIT 100`,
     { params: { orgId, projectId } },
   );
+
   const nodeById = new Map<string, Node>();
-  const edges: Record<string, unknown>[] = [];
+  const edgeById = new Map<string, Record<string, unknown>>();
   for (const row of result.data ?? []) {
-    nodeById.set(nodeId(row.m), row.m);
-    edges.push({
-      id: String(row.r.properties.id ?? ""),
-      type: row.r.relationshipType,
-      from: String(row.r.properties.fromId ?? ""),
-      to: String(row.r.properties.toId ?? ""),
-      current: Boolean(row.r.properties.current),
-    });
+    for (const node of row.ns ?? []) nodeById.set(nodeId(node), node);
+    for (const rel of row.rs ?? []) {
+      const id = String(rel.properties.id ?? "");
+      edgeById.set(id, {
+        id,
+        type: rel.relationshipType,
+        from: String(rel.properties.fromId ?? ""),
+        to: String(rel.properties.toId ?? ""),
+        validFrom: (rel.properties.validFrom as string | undefined) ?? null,
+        validTo: (rel.properties.validTo as string | undefined) ?? null,
+        current: Boolean(rel.properties.current ?? true),
+        provenance: [],
+        confidence: Number(rel.properties.confidence ?? 1),
+      });
+    }
   }
-  return { nodes: [...nodeById.values()].map(ref), edges, truncated: false };
+
+  return {
+    nodes: [...nodeById.values()].map((node) => ({ ...ref(node), properties: propsOf(node) })),
+    edges: [...edgeById.values()],
+    truncated: false,
+  };
 }
 
 export async function listProjectRisks(orgId: string, projectId: string) {
@@ -156,14 +172,49 @@ export async function getLaunchReadiness(orgId: string, projectId: string) {
 }
 
 // ── Decisions ────────────────────────────────────────────────────────
+/** Owner via PRODUCED_DECISION and approver via APPROVED_BY; absent ones stay null. */
+async function decisionPeople(
+  orgId: string,
+  decisionIds: string[],
+): Promise<Map<string, { owner?: ReturnType<typeof ref>; approver?: ReturnType<typeof ref> }>> {
+  const people = new Map<string, { owner?: ReturnType<typeof ref>; approver?: ReturnType<typeof ref> }>();
+  if (decisionIds.length === 0) return people;
+
+  const graph = await getTenantGraph(orgId);
+
+  const owners = await graph.query<{ id: string; p: Node }>(
+    `MATCH (p)-[:PRODUCED_DECISION]->(d:Decision)
+     WHERE d.orgId = $orgId AND p.orgId = $orgId AND d.id IN $ids
+     RETURN d.id AS id, p`,
+    { params: { orgId, ids: decisionIds } },
+  );
+  for (const row of owners.data ?? []) {
+    people.set(row.id, { ...people.get(row.id), owner: ref(row.p) });
+  }
+
+  const approvers = await graph.query<{ id: string; a: Node }>(
+    `MATCH (d:Decision)-[:APPROVED_BY]->(a)
+     WHERE d.orgId = $orgId AND a.orgId = $orgId AND d.id IN $ids
+     RETURN d.id AS id, a`,
+    { params: { orgId, ids: decisionIds } },
+  );
+  for (const row of approvers.data ?? []) {
+    people.set(row.id, { ...people.get(row.id), approver: ref(row.a) });
+  }
+
+  return people;
+}
+
 export async function listDecisions(orgId: string) {
   const nodes = await matchLabel(orgId, "Decision");
+  const people = await decisionPeople(orgId, nodes.map(nodeId));
+
   return nodes.map((n) => ({
     id: nodeId(n),
     title: nodeLabel(n),
     date: field(n, "date"),
     status: field(n, "status") || "unknown",
-    owner: undefined,
+    owner: people.get(nodeId(n))?.owner ?? null,
     isSampleData: Boolean(n.properties.isSampleData),
   }));
 }
@@ -172,15 +223,27 @@ export async function getDecision(orgId: string, id: string) {
   const nodes = await matchLabel(orgId, "Decision");
   const decision = nodes.find((n) => nodeId(n) === id);
   if (!decision) return null;
+
+  const graph = await getTenantGraph(orgId);
+  const [people, affected] = await Promise.all([
+    decisionPeople(orgId, [id]),
+    graph.query<{ m: Node }>(
+      `MATCH (d:Decision {orgId: $orgId, id: $id})-[:AFFECTS]->(m)
+       WHERE m.orgId = $orgId RETURN m LIMIT 50`,
+      { params: { orgId, id } },
+    ),
+  ]);
+
   return {
     id: nodeId(decision),
     title: nodeLabel(decision),
     date: field(decision, "date"),
     status: field(decision, "status") || "unknown",
-    owner: undefined,
+    owner: people.get(id)?.owner ?? null,
+    approver: people.get(id)?.approver ?? null,
     rationale: field(decision, "rationale"),
     alternatives: safeParseArray(field(decision, "alternatives")),
-    affectedEntities: [],
+    affectedEntities: (affected.data ?? []).map((row) => ref(row.m)),
     citations: [],
   };
 }

@@ -47,9 +47,15 @@ export const env = {
   storage: {
     backend: (process.env.STORAGE_BACKEND ?? "fs") as "fs" | "s3",
   },
+  /** "gemini" or "anthropic". */
+  llmProvider: (process.env.LLM_PROVIDER ?? "gemini").toLowerCase(),
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY ?? "",
     model: process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
+  },
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY ?? "",
+    model: process.env.GEMINI_MODEL ?? "gemini-flash-latest",
   },
   voyage: {
     apiKey: process.env.VOYAGE_API_KEY ?? "",

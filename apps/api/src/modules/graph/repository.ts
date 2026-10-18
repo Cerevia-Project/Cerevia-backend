@@ -61,8 +61,9 @@ function toGraphEdge(edge: FalkorEdge) {
 
 export async function searchEntities(orgId: string, q: string, types?: string[]) {
   const graph = await getTenantGraph(orgId);
+  // CONTAINS is case-sensitive, so both sides are folded.
   const result = await graph.query<{ n: FalkorNode }>(
-    "MATCH (n) WHERE n.orgId = $orgId AND n.label CONTAINS $q RETURN n LIMIT 50",
+    "MATCH (n) WHERE n.orgId = $orgId AND toLower(n.label) CONTAINS toLower($q) RETURN n LIMIT 50",
     { params: { orgId, q } },
   );
 
@@ -100,17 +101,19 @@ export async function getNeighbors(
   const pattern =
     direction === "in" ? `<-[r]-` : direction === "out" ? `-[r]->` : `-[r]-`;
   const typeFilter = edgeTypes?.length ? " AND type(r) IN $edgeTypes" : "";
-  const result = await graph.query<{ m: FalkorNode; r: FalkorEdge }>(
+  const result = await graph.query<{ n: FalkorNode; m: FalkorNode; r: FalkorEdge }>(
     `MATCH (n {orgId: $orgId, id: $id})${pattern}(m {orgId: $orgId})
      WHERE true${typeFilter}
-     RETURN m, r
+     RETURN n, m, r
      LIMIT $limit`,
     { params: { orgId, id, limit, edgeTypes: edgeTypes ?? [] } },
   );
 
+  // Include the focused entity, or every edge points at a node the client never receives.
   const nodeById = new Map<string, FalkorNode>();
   const edges: FalkorEdge[] = [];
   for (const row of result.data ?? []) {
+    if (row.n) nodeById.set(String(row.n.properties.id), row.n);
     if (row.m) nodeById.set(String(row.m.properties.id), row.m);
     if (row.r) edges.push(row.r);
   }

@@ -1421,6 +1421,10 @@ paths:
               properties:
                 email: { type: string, format: email }
                 name: { type: string }
+                # Omitted: the account cannot sign in until a password is set.
+                password: { type: string, minLength: 8 }
+                # Role id; defaults to the viewer role when omitted.
+                role: { type: string }
       responses:
         '201':
           description: Created user
@@ -2132,7 +2136,11 @@ components:
         title: { type: string }
         date: { type: string, format: date-time }
         status: { type: string }
-        owner: { $ref: '#/components/schemas/EntityRef' }
+        # Null when no one is recorded as having made the decision.
+        owner:
+          anyOf:
+            - $ref: '#/components/schemas/EntityRef'
+            - type: 'null'
         isSampleData: { type: boolean }
 
     DecisionDetail:
@@ -2141,7 +2149,11 @@ components:
         - type: object
           required: [approver, rationale, alternatives, affectedEntities, citations]
           properties:
-            approver: { $ref: '#/components/schemas/EntityRef' }
+            # Null when no approver is recorded.
+            approver:
+              anyOf:
+                - $ref: '#/components/schemas/EntityRef'
+                - type: 'null'
             rationale: { type: string }
             alternatives:
               type: array
