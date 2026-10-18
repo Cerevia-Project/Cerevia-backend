@@ -1,20 +1,51 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { env } from "../../config/env.js";
+import { query } from "../../db/postgres.js";
+import { AppError } from "../../lib/errors.js";
+import { getLlmProvider, type LlmTool, type LlmToolResult } from "../llm/index.js";
 import { getToolDef, tools, type ToolContext } from "./tools.js";
 
-let client: Anthropic | undefined;
-
-function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic({ apiKey: env.anthropic.apiKey });
+function requireProvider() {
+  const provider = getLlmProvider();
+  if (!provider.isConfigured) {
+    throw new AppError(
+      "AI_UNAVAILABLE",
+      `The assistant is not configured in this environment (provider: ${provider.name}).`,
+    );
   }
-  return client;
+  return provider;
+}
+
+/** Maps provider failures to AI_UNAVAILABLE, logging the original for operators. */
+function asAgentError(error: unknown): AppError {
+  if (error instanceof AppError) return error;
+
+  console.error("Agent call failed:", error);
+  const status = (error as { status?: number }).status;
+  if (status === 401 || status === 403) {
+    return new AppError("AI_UNAVAILABLE", "The assistant's credentials were rejected.");
+  }
+  if (status === 429) {
+    return new AppError("AI_UNAVAILABLE", "The assistant is rate limited. Try again shortly.");
+  }
+  if (status === 404) {
+    return new AppError(
+      "AI_UNAVAILABLE",
+      "The configured assistant model is not available. Check the model name in the environment.",
+    );
+  }
+  if (typeof status === "number" && status >= 500) {
+    return new AppError("AI_UNAVAILABLE", "The assistant's provider is unavailable.");
+  }
+  if (error instanceof Error && /authentication|api[ _-]?key/i.test(error.message)) {
+    return new AppError("AI_UNAVAILABLE", "The assistant is not configured in this environment.");
+  }
+  return new AppError("AI_UNAVAILABLE", "The assistant could not complete this answer.");
 }
 
 export interface Citation {
   id: string;
   documentId: string;
   documentTitle: string;
+  documentVersion: string;
   chunkId: string;
   passage: string;
   sourceType: string;
@@ -22,9 +53,11 @@ export interface Citation {
 }
 
 export interface AgentClaim {
+  id: string;
   text: string;
   kind: "confirmed" | "inferred" | "hypothesis" | "conflicting" | "missing";
   citationIds: string[];
+  pathIds: string[];
 }
 
 export interface AgentAnswer {
@@ -42,11 +75,11 @@ interface ComposedAnswer {
   followUps: string[];
 }
 
-const COMPOSE_TOOL: Anthropic.Tool = {
+const COMPOSE_TOOL: LlmTool = {
   name: "compose_answer",
   description:
     "Provide the final answer once you have enough evidence. Every confirmed claim must cite retrieved chunk ids.",
-  input_schema: {
+  parameters: {
     type: "object",
     additionalProperties: false,
     required: ["text", "answerStatus", "claims", "followUps"],
@@ -72,7 +105,6 @@ const COMPOSE_TOOL: Anthropic.Tool = {
       followUps: { type: "array", items: { type: "string" } },
     },
   },
-  strict: true,
 };
 
 const SYSTEM_PROMPT = `You are the Cerevia assistant. Answer questions about the organization using ONLY the provided tools.
@@ -85,81 +117,79 @@ Rules:
 - When you have gathered enough evidence, call compose_answer exactly once.`;
 
 export async function runAgent(ctx: ToolContext, question: string): Promise<AgentAnswer> {
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
+  try {
+    return await runAgentLoop(ctx, question);
+  } catch (error) {
+    throw asAgentError(error);
+  }
+}
+
+async function runAgentLoop(ctx: ToolContext, question: string): Promise<AgentAnswer> {
+  const provider = requireProvider();
   const retrievedCitations = new Map<string, Citation>();
   let composed: ComposedAnswer | undefined;
 
-  const toolSchemas: Anthropic.Tool[] = [...tools.map((t) => t.tool), COMPOSE_TOOL];
+  const conversation = provider.startConversation({
+    system: SYSTEM_PROMPT,
+    tools: [...tools.map((t) => t.tool), COMPOSE_TOOL],
+    question,
+  });
+
+  let pendingResults: LlmToolResult[] | undefined;
 
   for (let i = 0; i < 8; i++) {
-    const response = await getClient().messages.create({
-      model: env.anthropic.model,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      tools: toolSchemas,
-      tool_choice: { type: "auto" },
-      messages,
-    });
+    const turn = await conversation.advance(pendingResults);
 
-    const toolUses = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
-    );
-
-    const compose = toolUses.find((b) => b.name === "compose_answer");
+    const compose = turn.toolCalls.find((call) => call.name === "compose_answer");
     if (compose) {
       composed = compose.input as unknown as ComposedAnswer;
       break;
     }
 
-    if (toolUses.length === 0) {
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === "text")
-        .map((b) => b.text)
-        .join("");
-      composed = { text, answerStatus: "answered", claims: [], followUps: [] };
+    if (turn.toolCalls.length === 0) {
+      // The model answered in prose. Ask once more, requiring the structured answer,
+      // so claims keep their evidence kinds and citations.
+      const forced = await conversation.advance(
+        [],
+        { forceTool: "compose_answer" },
+      ).catch(() => undefined);
+
+      const composeCall = forced?.toolCalls.find((call) => call.name === "compose_answer");
+      composed = composeCall
+        ? (composeCall.input as unknown as ComposedAnswer)
+        : { text: turn.text, answerStatus: "answered", claims: [], followUps: [] };
       break;
     }
 
-    messages.push({
-      role: "assistant",
-      content: response.content.filter(
-        (b) => b.type === "text" || b.type === "tool_use",
-      ) as Anthropic.ContentBlockParam[],
-    });
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const toolUse of toolUses) {
-      const def = getToolDef(toolUse.name);
+    const toolResults: LlmToolResult[] = [];
+    for (const call of turn.toolCalls) {
+      const def = getToolDef(call.name);
       if (!def) {
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolUse.id,
-          content: "Unknown tool",
-          is_error: true,
-        });
+        toolResults.push({ id: call.id, name: call.name, output: "Unknown tool", isError: true });
         continue;
       }
 
       let result: unknown;
       try {
-        result = await def.handler(toolUse.input as Record<string, unknown>, ctx);
+        result = await def.handler(call.input, ctx);
       } catch (error) {
         toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolUse.id,
-          content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
-          is_error: true,
+          id: call.id,
+          name: call.name,
+          output: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
+          isError: true,
         });
         continue;
       }
 
-      if (toolUse.name === "search_documents") {
+      if (call.name === "search_documents") {
         const hits = (result as { hits?: RetrievalHitLike[] }).hits ?? [];
         for (const hit of hits) {
           retrievedCitations.set(hit.chunkId, {
             id: `cit_${hit.chunkId}`,
             documentId: hit.documentId,
             documentTitle: hit.documentTitle,
+            documentVersion: "",
             chunkId: hit.chunkId,
             passage: hit.text.slice(0, 600),
             sourceType: "document",
@@ -168,14 +198,10 @@ export async function runAgent(ctx: ToolContext, question: string): Promise<Agen
         }
       }
 
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: toolUse.id,
-        content: JSON.stringify(result),
-      });
+      toolResults.push({ id: call.id, name: call.name, output: result });
     }
 
-    messages.push({ role: "user", content: toolResults });
+    pendingResults = toolResults;
   }
 
   if (!composed) {
@@ -191,13 +217,22 @@ export async function runAgent(ctx: ToolContext, question: string): Promise<Agen
       const kind = (c.kind === "confirmed" && citationIds.length === 0 ? "inferred" : c.kind) as AgentClaim["kind"];
       return { text: c.text, kind, citationIds };
     })
-    .filter((c) => c.text.length > 0);
+    .filter((c) => c.text.length > 0)
+    // The contract requires id and pathIds; no graph paths are traced yet.
+    .map((c, index) => ({ id: `clm_${index + 1}`, ...c, pathIds: [] }));
+
+  const versions = await latestVersions(ctx.orgId, [
+    ...new Set([...retrievedCitations.values()].map((c) => c.documentId)),
+  ]);
 
   return {
     text: composed.text,
     answerStatus: composed.answerStatus,
     claims,
-    citations: [...retrievedCitations.values()],
+    citations: [...retrievedCitations.values()].map((c) => ({
+      ...c,
+      documentVersion: versions.get(c.documentId) ?? "unknown",
+    })),
     followUps: composed.followUps ?? [],
   };
 }
@@ -207,4 +242,14 @@ interface RetrievalHitLike {
   documentId: string;
   documentTitle: string;
   text: string;
+}
+
+async function latestVersions(orgId: string, documentIds: string[]): Promise<Map<string, string>> {
+  if (documentIds.length === 0) return new Map();
+  const result = await query<{ document_id: string; version: number }>(
+    `SELECT document_id, max(version) AS version FROM document_versions
+     WHERE org_id = $1 AND document_id = ANY($2) GROUP BY document_id`,
+    [orgId, documentIds],
+  );
+  return new Map(result.rows.map((row) => [row.document_id, String(row.version)]));
 }

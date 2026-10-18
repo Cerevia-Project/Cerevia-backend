@@ -1,15 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { env } from "../../config/env.js";
 import { ENTITY_TYPES, RELATIONSHIP_TYPES } from "../graph/entities.js";
-
-let client: Anthropic | undefined;
-
-function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic({ apiKey: env.anthropic.apiKey });
-  }
-  return client;
-}
+import { getLlmProvider, type LlmTool } from "../llm/index.js";
 
 export interface ExtractedEntity {
   name: string;
@@ -30,11 +20,11 @@ export interface ExtractionResult {
   relationships: ExtractedRelationship[];
 }
 
-const EXTRACT_TOOL: Anthropic.Tool = {
+const EXTRACT_TOOL: LlmTool = {
   name: "extract_knowledge",
   description:
     "Extract entities and relationships from the provided text. Every entity and relationship MUST include a verbatim 'passage' copied from the text that supports it.",
-  input_schema: {
+  parameters: {
     type: "object",
     additionalProperties: false,
     required: ["entities", "relationships"],
@@ -69,7 +59,6 @@ const EXTRACT_TOOL: Anthropic.Tool = {
       },
     },
   },
-  strict: true,
 };
 
 const SYSTEM_PROMPT =
@@ -83,30 +72,22 @@ const SYSTEM_PROMPT =
  * is configured, so ingestion degrades gracefully until a key is added.
  */
 export async function extractEntities(text: string): Promise<ExtractionResult> {
-  if (!env.anthropic.apiKey) {
+  const provider = getLlmProvider();
+  if (!provider.isConfigured) {
     return { entities: [], relationships: [] };
   }
 
-  const response = await getClient().messages.create({
-    model: env.anthropic.model,
-    max_tokens: 16000,
+  const result = await provider.callTool<ExtractionResult>({
     system: SYSTEM_PROMPT,
-    tools: [EXTRACT_TOOL],
-    tool_choice: { type: "auto" },
-    messages: [
-      { role: "user", content: `Extract entities and relationships from this text:\n\n<<<${text}>>>` },
-    ],
+    prompt: `Extract entities and relationships from this text:\n\n<<<${text}>>>`,
+    tool: EXTRACT_TOOL,
+    parse: (input) => ({
+      entities: Array.isArray(input.entities) ? (input.entities as ExtractedEntity[]) : [],
+      relationships: Array.isArray(input.relationships)
+        ? (input.relationships as ExtractedRelationship[])
+        : [],
+    }),
   });
 
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "extract_knowledge") {
-      // `strict: true` guarantees the input matches input_schema.
-      const input = block.input as ExtractionResult;
-      return {
-        entities: input.entities ?? [],
-        relationships: input.relationships ?? [],
-      };
-    }
-  }
-  return { entities: [], relationships: [] };
+  return result ?? { entities: [], relationships: [] };
 }
