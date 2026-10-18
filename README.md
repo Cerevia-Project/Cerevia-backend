@@ -6,6 +6,85 @@ PostgreSQL for identity/workflow, Redis/BullMQ for the ingestion queue, and a
 pluggable LLM provider (Gemini by default, Anthropic optional) plus Voyage AI
 embeddings.
 
+## How the graph works
+
+FalkorDB is the core of Cerevia.
+It holds the organization's knowledge graph, the document chunks, their vector embeddings and the full-text index, so every answer the assistant gives is assembled from graph queries.
+PostgreSQL only stores identity, permissions, workflow and the audit trail.
+
+Each organization gets its own graph (`org_<orgId>`), and every node and edge also carries `orgId`, so queries are tenant-scoped twice.
+
+### Nodes and relationships
+
+```mermaid
+graph LR
+  Employee -->|BELONGS_TO_TEAM| Team
+  Employee -->|RESPONSIBLE_FOR| Team
+  Employee -->|HAS_EXPERTISE_IN| Expertise
+  Employee -->|OWNS| Task
+  Employee -->|PRODUCED_DECISION| Decision
+  Decision -->|APPROVED_BY| Employee
+  Decision -->|AFFECTS| Project
+  Project -->|DEPENDS_ON| Task
+  Task -->|DEPENDS_ON| Task
+  Milestone -->|CONTAINS_TASK| Task
+  Document -->|HAS_CHUNK| Chunk
+  Project -.->|SUPPORTED_BY| Chunk
+  Decision -.->|SUPPORTED_BY| Chunk
+  Task -.->|SUPPORTED_BY| Chunk
+```
+
+Entity types: `Employee`, `Team`, `Department`, `Project`, `Milestone`, `Task`, `Issue`, `Decision`, `Meeting`, `Customer`, `Ticket`, `Policy`, `System`, `ActionItem`, `Expertise`.
+Content types: `Document` and `Chunk`, where each chunk stores its text and a `vecf32` embedding.
+
+Dashed edges are provenance.
+When ingestion extracts an entity from a document, it links the entity to the chunk containing the supporting passage (`SUPPORTED_BY`), so every fact in the graph can be traced back to the exact text it came from.
+The schema also defines `BLOCKS`, `MENTIONS`, `RELATES_TO`, `SUPERSEDES`, `COMMITTED_TO` and `DESCRIBES` for extracted relationships.
+
+### How a document becomes graph knowledge
+
+```mermaid
+flowchart LR
+  U[Upload] --> X[Extract text] --> C[Chunk] --> E[Embed with Voyage]
+  E --> W1[(Chunk nodes + vector index)]
+  C --> L[LLM entity and relationship extraction]
+  L --> W2[(Entity nodes + typed edges + SUPPORTED_BY provenance)]
+```
+
+### How the agent queries the graph
+
+The assistant is a bounded tool-calling loop.
+The model cannot read data directly: every piece of evidence it sees comes from one of these tools, and every tool is a FalkorDB query.
+
+| Agent tool | What it asks FalkorDB |
+| --- | --- |
+| `search_documents` | Hybrid retrieval over `Chunk`: `CALL db.idx.vector.queryNodes('Chunk', 'embedding', k, vecf32(q))` merged with `CALL db.idx.fulltext.queryNodes('Chunk', q)` |
+| `search_entities` | `MATCH (n) WHERE n.orgId = $orgId AND toLower(n.label) CONTAINS toLower($q)` |
+| `get_entity_details` | `MATCH (n {orgId: $orgId, id: $id}) RETURN n` with its provenance |
+| `traverse_relationships` | `MATCH (n {id: $id})-[r]-(m) RETURN n, m, r`, the entity's neighbourhood |
+| `get_project_status` | The project node with its owners, milestones, tasks and documents |
+| `search_decisions` | `Decision` nodes with owner (`PRODUCED_DECISION`), approver (`APPROVED_BY`) and affected work (`AFFECTS`) |
+| `find_expertise` | `MATCH (e:Employee)-[:HAS_EXPERTISE_IN]->(x) WHERE x.label CONTAINS $topic` |
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Agent as Agent loop
+  participant Graph as FalkorDB
+  User->>Agent: Why is the payments launch delayed?
+  Agent->>Graph: search_documents (vector + full-text over Chunk)
+  Graph-->>Agent: Passages with chunk ids
+  Agent->>Graph: search_entities / traverse_relationships
+  Graph-->>Agent: Project DEPENDS_ON Task DEPENDS_ON Task
+  Agent->>User: Answer, claims typed by evidence kind, citations to chunks
+```
+
+### Why the graph is the source of truth
+
+- **Citations are verified against the graph.** Citations to chunks that `search_documents` did not return in the same turn are removed, and a `confirmed` claim left without one is downgraded to `inferred`, so the model cannot cite a passage it never retrieved.
+- **Multi-hop answers come from traversal.** For the question above, the delay is the chain `Payments Launch -DEPENDS_ON-> Integrate payment gateway -DEPENDS_ON-> Vendor sign-off`, which is a graph path. Keyword search alone would not find it.
+- **Screens read the graph too.** The overview, the graph explorer, project dependencies, decisions, people and expertise all query FalkorDB directly, and the frontend renders the same neighbourhoods the agent traverses.
+
 This is a pnpm-workspace monorepo:
 
 ```
