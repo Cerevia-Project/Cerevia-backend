@@ -1,9 +1,10 @@
 # Cerevia-backend
 
 Intelligence layer for Cerevia: knowledge graph, hybrid retrieval, and a
-controlled assistant agent. **Express + TypeScript + FalkorDB**, with PostgreSQL
-for identity/workflow, Redis/BullMQ for the ingestion queue, and S3-compatible
-object storage (LocalStack in dev).
+controlled, citation-grounded assistant. **Express + TypeScript + FalkorDB**, with
+PostgreSQL for identity/workflow, Redis/BullMQ for the ingestion queue, and a
+pluggable LLM provider (Gemini by default, Anthropic optional) plus Voyage AI
+embeddings.
 
 This is a pnpm-workspace monorepo:
 
@@ -30,13 +31,14 @@ docs/
    pnpm install
    ```
 
-2. Start the services (FalkorDB, PostgreSQL, Redis, LocalStack S3):
+2. Start the services (FalkorDB, PostgreSQL, Redis):
 
    ```sh
    docker compose up -d
    ```
 
-3. Copy `.env.example` to `.env` and fill in `FALKORDB_PASSWORD`:
+3. Copy `.env.example` to `.env` and fill in the API keys you want to use
+   (`FALKORDB_PASSWORD` is optional — leave it empty for passwordless local dev):
 
    ```sh
    cp .env.example .env
@@ -47,6 +49,21 @@ docs/
    ```sh
    pnpm dev          # tsx watch, http://localhost:3001
    ```
+
+## LLM provider
+
+The assistant and entity/relation extraction run through a provider abstraction,
+selected by `LLM_PROVIDER`:
+
+| Provider | `LLM_PROVIDER` | Env vars |
+| --- | --- | --- |
+| Gemini (default) | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` (`gemini-flash-latest`) |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (`claude-opus-5-5`) |
+
+Embeddings are separate and always use Voyage AI (`VOYAGE_API_KEY`,
+`VOYAGE_MODEL`, `VOYAGE_EMBEDDING_DIMENSION`). Without a configured provider or
+embedding key, ingestion and answers degrade gracefully (keyword-only search, no
+extraction).
 
 ## Scripts
 
@@ -77,17 +94,18 @@ pnpm contracts:mock       # mock API on http://localhost:4010
 
 ## Services (Docker Compose)
 
-| Service  | Host port | Purpose                              |
-| -------- | --------- | ------------------------------------ |
-| falkordb | 6379, 3000| Graph + vector (one graph per org)   |
-| postgres | 5433      | Identity, RBAC, workflow, audit      |
-| redis    | 6380      | BullMQ queue (separate from FalkorDB)|
+| Service  | Host port                    | Purpose                              |
+| -------- | ---------------------------- | ------------------------------------ |
+| falkordb | `6379` (graph), `3100` (UI)  | Graph + vector + full-text (one graph per org) |
+| postgres | `5433`                       | Identity, RBAC, workflow, audit      |
+| redis    | `6380`                       | BullMQ queue (separate from FalkorDB)|
 
 Object storage uses a **filesystem backend** in dev (`.data/uploads`); set
-`STORAGE_BACKEND=s3` to use an S3-compatible store.
+`STORAGE_BACKEND=s3` and the `S3_*` variables to use an S3-compatible store.
 
 ## Environment variables
 
-See `.env.example` for the full list. Core variables: `PORT`,
-`FALKORDB_*`, `POSTGRES_*`, `REDIS_*`, `S3_*`, `ANTHROPIC_API_KEY`,
-`VOYAGE_API_KEY`.
+See `.env.example` for the full list. Core variables: `PORT`, `LLM_PROVIDER`,
+`GEMINI_*` / `ANTHROPIC_*`, `VOYAGE_*`, `FALKORDB_*`, `POSTGRES_*` (or
+`DATABASE_URL`), `REDIS_*` (or `REDIS_URL`), `S3_*`, `STORAGE_BACKEND`,
+`FRONTEND_ORIGIN`, `AUTO_MIGRATE`, `BOOTSTRAP_*`.
