@@ -34,6 +34,9 @@ Tracked honestly. Each item is a deliberate scope decision for this increment.
   flagged as `contradiction` candidates. Authority/lineage/date weighting and
   version-aware comparison are not implemented.
 - **Decision revisions + evidence trace (`validity`)** are stubs.
+- **A decision may have no owner or approver.** Extraction cannot always
+  establish one, so `DecisionSummary.owner` and `DecisionDetail.approver` are
+  nullable in the contract and the UI states the absence rather than hiding it.
 
 ## Actions
 
@@ -41,6 +44,12 @@ Tracked honestly. Each item is a deliberate scope decision for this increment.
   because v1 has no implemented connectors.
 - **Proposal drafts are template-based** — the agent-side `prepare_action_proposal`
   tool is not yet wired for LLM-generated drafts.
+
+## Connectors
+
+- **No connector is implemented.** `GET /connectors` lists the catalog with
+  every entry `state: planned`, and the UI makes a planned connector
+  non-interactive. v1 ingests by upload only.
 
 ## Infrastructure
 

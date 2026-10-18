@@ -103,11 +103,14 @@ Updated per phase. Feature-by-feature build of the Cerevia backend.
 - Ingestion pipeline (BullMQ): validate → store → extract text (PDF/DOCX/TXT/MD/CSV/JSON)
   → chunk; entity/embedding/graph stages are recorded stubs for B2.
 - Audit log, rate limiting, RFC 9457 errors, cursor pagination, prefixed IDs.
+- `/overview` (aggregate counts, recent activity, alerts) and `/connectors`
+  (catalog, every entry `planned` until one can actually ingest).
 - Cross-tenant isolation tests (4 passing).
 
 ### Outstanding / deferred
 
-- `/overview`, `/connectors`, `/demo/load`, ingestion `/events` (SSE) endpoints.
+- Ingestion `/events` (SSE) endpoint - polling the job is the supported baseline.
+- `/graph/paths` and entity `/history` still return empty stubs.
 - Content-hash re-upload dedupe (B2 version handling).
 - Postgres RLS second-line-of-defense (hardening, B6).
 - Multi-org login selection (currently picks the first membership).
