@@ -20,7 +20,14 @@ router.get("/users", requireAuth, requirePermission("admin:users"), async (req, 
      ORDER BY u.created_at ASC`,
     [req.ctx!.orgId],
   );
-  res.json({ items: result.rows });
+  res.json({
+    items: result.rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      isSampleData: row.is_sample_data,
+    })),
+  });
 });
 
 router.post("/users", requireAuth, requirePermission("admin:users"), async (req, res) => {

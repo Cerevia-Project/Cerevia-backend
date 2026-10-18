@@ -126,5 +126,18 @@ export async function loadDemoData(orgId: string) {
     isSampleData: true,
   });
 
+  await writeRelationship(graph, {
+    orgId, type: "PRODUCED_DECISION", fromLabel: "Employee", toLabel: "Decision",
+    fromId: "emp_ada", toId: "dec_queue",
+  });
+  await writeRelationship(graph, {
+    orgId, type: "APPROVED_BY", fromLabel: "Decision", toLabel: "Employee",
+    fromId: "dec_queue", toId: "emp_kate",
+  });
+  await writeRelationship(graph, {
+    orgId, type: "AFFECTS", fromLabel: "Decision", toLabel: "Project",
+    fromId: "dec_queue", toId: "prj_launch",
+  });
+
   return { teams: 3, employees: employees.length, projects: 1, tasks: 3, decisions: 1 };
 }
